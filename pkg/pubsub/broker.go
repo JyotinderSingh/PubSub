@@ -72,7 +72,10 @@ func (b *Broker) startGRPCServer() error {
 
 func (b *Broker) Stop() error {
 	b.grpcServer.GracefulStop()
-	return b.listener.Close()
+	if err := b.listener.Close(); err != nil {
+		b.logger.Info("Failed to close listener", zap.Error(err))
+	}
+	return nil
 }
 
 func (b *Broker) awaitShutdown() error {
