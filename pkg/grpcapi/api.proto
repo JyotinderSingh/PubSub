@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package grpcapi;
+
+option go_package = "github.com/JyotinderSingh/pubsub/pkg/grpcapi";
+
+// The PubSub service definition.
+service PubSubService {
+  // Send a message to a topic
+  rpc Publish(PublishRequest) returns (PublishResponse) {}
+
+  // Subscribe to a topic
+  rpc Subscribe(SubscribeRequest) returns (stream Message) {}
+
+  // Unsubscribe from a topic
+  rpc Unsubscribe(UnsubscribeRequest) returns (UnsubscribeResponse) {}
+}
+
+message PublishRequest {
+  string topic = 2;
+  bytes message = 3;
+}
+
+message Message {
+  string topic = 1;
+  bytes message = 2;
+}
+
+message PublishResponse {
+  bool success = 1;
+}
+
+message SubscribeRequest {
+  uint32 subscriber_id = 1;
+  string topic = 2;
+}
+
+message UnsubscribeRequest {
+  uint32 subscriber_id = 1;
+  string topic = 2;
+}
+
+message UnsubscribeResponse {
+  bool success = 1;
+}
