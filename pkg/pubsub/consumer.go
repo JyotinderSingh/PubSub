@@ -57,12 +57,16 @@ func (c *Consumer) Subscribe(topic string) error {
 		return nil
 	}
 
-	stream, err := c.client.Subscribe(c.ctx, &pb.SubscribeRequest{SubscriberId: c.ID, Topic: topic})
+	// Context to manage the stream.
+	streamCtx, streamCancel := context.WithCancel(c.ctx)
+
+	stream, err := c.client.Subscribe(streamCtx, &pb.SubscribeRequest{SubscriberId: c.ID, Topic: topic})
+
 	if err != nil {
+		streamCancel()
 		return err
 	}
 
-	streamCtx, streamCancel := context.WithCancel(c.ctx)
 	c.subscriptions.Store(topic, streamCancel)
 
 	// Start a goroutine to receive messages from the broker.
@@ -85,7 +89,7 @@ func (c *Consumer) Unsubscribe(topic string) error {
 	c.subscriptions.Delete(topic)
 
 	// Send an unsubscribe request to the broker.
-	_, err := c.client.Unsubscribe(c.ctx, &pb.UnsubscribeRequest{Topic: topic})
+	_, err := c.client.Unsubscribe(c.ctx, &pb.UnsubscribeRequest{Topic: topic, SubscriberId: c.ID})
 	if err != nil {
 		return err
 	}
@@ -99,6 +103,7 @@ func (c *Consumer) receive(stream pb.PubSubService_SubscribeClient, ctx context.
 	for {
 		select {
 		case <-ctx.Done():
+			stream.CloseSend()
 			return
 		default:
 			msg, err := stream.Recv()

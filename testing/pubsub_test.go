@@ -121,3 +121,47 @@ func TestMultiplePublishersAndSubscribers(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 }
+
+// Tests sending a message to a subscriber which has unsubscribed.
+func TestUnsubscribe(t *testing.T) {
+	setup()
+	defer teardown()
+
+	publisher := setupPublisher(t, "localhost:50054")
+	defer publisher.Close()
+
+	consumer1 := setupConsumer(t, "localhost:50054")
+	defer consumer1.Close()
+
+	consumer2 := setupConsumer(t, "localhost:50054")
+	defer consumer2.Close()
+
+	consumer1.Subscribe("topic")
+	consumer2.Subscribe("topic")
+
+	time.Sleep(100 * time.Millisecond)
+
+	publisher.Publish("topic", []byte("hello"))
+
+	message := <-consumer1.Messages
+	assertMessage(t, "topic", "hello", message)
+
+	message = <-consumer2.Messages
+	assertMessage(t, "topic", "hello", message)
+
+	consumer1.Unsubscribe("topic")
+
+	time.Sleep(200 * time.Millisecond)
+
+	publisher.Publish("topic", []byte("world"))
+
+	// No message should be received by consumer1.
+	select {
+	case message := <-consumer1.Messages:
+		t.Fatalf("unexpected message received by consumer1: %v", message)
+	default:
+	}
+
+	message = <-consumer2.Messages
+	assertMessage(t, "topic", "world", message)
+}

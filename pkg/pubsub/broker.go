@@ -139,6 +139,8 @@ func (b *Broker) Unsubscribe(ctx context.Context, in *pb.UnsubscribeRequest) (*p
 		return &pb.UnsubscribeResponse{Success: false}, nil
 	}
 
+	delete(b.subscribers[key.topic], key.subscriberId)
+
 	delete(b.topicSubscriberStreamMutexes, key)
 
 	b.logger.Info("Subscriber unsubscribed", zap.String("topic", key.topic), zap.Uint32("id", key.subscriberId))
