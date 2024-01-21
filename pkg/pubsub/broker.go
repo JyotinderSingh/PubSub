@@ -15,14 +15,12 @@ import (
 	"google.golang.org/grpc"
 )
 
-type subscriber struct {
-	id     uint32
-	stream pb.PubSubService_SubscribeServer
-}
+type subscriberStream pb.PubSubService_SubscribeServer
 
-type topicAndSubscriber struct {
-	topic      string
-	subscriber uint32
+// Uniquely identifies a subscriber stream for a given topic.
+type streamKey struct {
+	topic        string
+	subscriberId uint32
 }
 
 type Broker struct {
@@ -30,8 +28,8 @@ type Broker struct {
 	port                         string
 	listener                     net.Listener
 	grpcServer                   *grpc.Server
-	subscribers                  map[string]map[uint32]subscriber  // Map of topic to subscriber stream.
-	topicSubscriberStreamMutexes map[string]map[uint32]*sync.Mutex // Mutex for each subscriber stream
+	subscribers                  map[string]map[uint32]subscriberStream // Map of topic to subscriber stream.
+	topicSubscriberStreamMutexes map[streamKey]*sync.Mutex              // Mutex for each subscriber stream
 	mu                           sync.RWMutex
 	logger                       *zap.Logger
 }
@@ -39,8 +37,8 @@ type Broker struct {
 func NewBroker(port string) *Broker {
 	return &Broker{
 		port:                         port,
-		subscribers:                  make(map[string]map[uint32]subscriber),
-		topicSubscriberStreamMutexes: make(map[string]map[uint32]*sync.Mutex),
+		subscribers:                  make(map[string]map[uint32]subscriberStream),
+		topicSubscriberStreamMutexes: make(map[streamKey]*sync.Mutex),
 		logger:                       zap.Must(zap.NewProduction()),
 	}
 }
@@ -95,75 +93,63 @@ func (b *Broker) awaitShutdown() error {
 func (b *Broker) Subscribe(in *pb.SubscribeRequest, stream pb.PubSubService_SubscribeServer) error {
 	b.mu.Lock()
 
-	if _, ok := b.subscribers[in.GetTopic()]; !ok {
-		b.subscribers[in.GetTopic()] = make(map[uint32]subscriber)
+	key := streamKey{topic: in.GetTopic(), subscriberId: in.GetSubscriberId()}
+
+	if _, ok := b.subscribers[key.topic]; !ok {
+		b.subscribers[key.topic] = make(map[uint32]subscriberStream)
 	}
 
-	subscriberInfo := subscriber{id: in.GetSubscriberId(), stream: stream}
-	b.subscribers[in.GetTopic()][in.GetSubscriberId()] = subscriberInfo
+	b.subscribers[key.topic][key.subscriberId] = stream
 
-	if _, ok := b.topicSubscriberStreamMutexes[in.GetTopic()]; !ok {
-		b.topicSubscriberStreamMutexes[in.GetTopic()] = make(map[uint32]*sync.Mutex)
-	}
+	b.topicSubscriberStreamMutexes[key] = &sync.Mutex{}
 
-	if _, ok := b.topicSubscriberStreamMutexes[in.GetTopic()][in.GetSubscriberId()]; !ok {
-		b.topicSubscriberStreamMutexes[in.GetTopic()][in.GetSubscriberId()] = &sync.Mutex{}
-	}
+	b.logger.Info("New subscriber", zap.String("topic", key.topic), zap.Uint32("id", key.subscriberId))
 
 	b.mu.Unlock()
 
-	b.logger.Info("New subscriber", zap.String("topic", in.GetTopic()), zap.Uint32("id", in.GetSubscriberId()))
-
-	<-subscriberInfo.stream.Context().Done()
+	<-stream.Context().Done()
 	// Wait for the client to close the stream
 	return nil
-
 }
 
 func (b *Broker) Unsubscribe(ctx context.Context, in *pb.UnsubscribeRequest) (*pb.UnsubscribeResponse, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if _, ok := b.subscribers[in.GetTopic()]; !ok {
+	key := streamKey{topic: in.GetTopic(), subscriberId: in.GetSubscriberId()}
+
+	if _, ok := b.subscribers[key.topic]; !ok {
 		return &pb.UnsubscribeResponse{Success: false}, nil
 	}
 
-	if _, ok := b.subscribers[in.GetTopic()][in.GetSubscriberId()]; !ok {
+	if _, ok := b.subscribers[key.topic][key.subscriberId]; !ok {
 		return &pb.UnsubscribeResponse{Success: false}, nil
 	}
 
-	delete(b.subscribers[in.GetTopic()], in.GetSubscriberId())
+	delete(b.topicSubscriberStreamMutexes, key)
 
-	if _, ok := b.topicSubscriberStreamMutexes[in.GetTopic()]; !ok {
-		return &pb.UnsubscribeResponse{Success: false}, nil
-	}
-
-	if _, ok := b.topicSubscriberStreamMutexes[in.GetTopic()][in.GetSubscriberId()]; !ok {
-		return &pb.UnsubscribeResponse{Success: false}, nil
-	}
-
-	delete(b.topicSubscriberStreamMutexes[in.GetTopic()], in.GetSubscriberId())
-
-	b.logger.Info("Subscriber unsubscribed", zap.String("topic", in.GetTopic()), zap.Uint32("id", in.GetSubscriberId()))
+	b.logger.Info("Subscriber unsubscribed", zap.String("topic", key.topic), zap.Uint32("id", key.subscriberId))
 	return &pb.UnsubscribeResponse{Success: true}, nil
 }
 
 func (b *Broker) Publish(ctx context.Context, in *pb.PublishRequest) (*pb.PublishResponse, error) {
 	b.mu.RLock()
 
-	// brokenSubscribers stores topic and subsriber id of the subscribers that are broken.
-	// We will remove them from the list later.
-	brokenSubscribers := make([]topicAndSubscriber, 0)
-	for _, sub := range b.subscribers[in.GetTopic()] {
-		// Get the mutex for this subscriber
-		b.topicSubscriberStreamMutexes[in.GetTopic()][sub.id].Lock()
-		err := sub.stream.Send(&pb.Message{Topic: in.GetTopic(), Message: in.GetMessage()})
+	brokenSubscribers := make([]streamKey, 0)
+	for subscriberId, stream := range b.subscribers[in.GetTopic()] {
+		// Acquire a lock on this subscriber's stream for this topic.
+		key := streamKey{topic: in.GetTopic(), subscriberId: subscriberId}
+		b.topicSubscriberStreamMutexes[key].Lock()
+
+		err := stream.Send(&pb.Message{Topic: in.GetTopic(), Message: in.GetMessage()})
+
+		// Release the lock on this subscriber's stream for this topic.
+		b.topicSubscriberStreamMutexes[key].Unlock()
 		if err != nil {
-			b.logger.Error("Failed to send message to subscriber", zap.Uint32("id", sub.id), zap.Error(err))
+			b.logger.Error("Failed to send message to subscriber", zap.Uint32("id", subscriberId), zap.Error(err))
 			// Add to broken subscribers list so that we can remove it later.
-			brokenSubscribers = append(brokenSubscribers, topicAndSubscriber{topic: in.GetTopic(), subscriber: sub.id})
+			brokenSubscribers = append(brokenSubscribers, streamKey{topic: in.GetTopic(), subscriberId: subscriberId})
 		}
-		b.topicSubscriberStreamMutexes[in.GetTopic()][sub.id].Unlock()
 	}
 	b.mu.RUnlock()
 
@@ -178,13 +164,13 @@ func (b *Broker) Publish(ctx context.Context, in *pb.PublishRequest) (*pb.Publis
 }
 
 // Removes broken subscribers from all the topics.
-func (b *Broker) removeBrokenSubscribers(topicsAndSubscribers []topicAndSubscriber) {
+func (b *Broker) removeBrokenSubscribers(keys []streamKey) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	// Iterate through all topics and remove broken subscribers
-	for _, topicAndSubscriber := range topicsAndSubscribers {
-		delete(b.subscribers[topicAndSubscriber.topic], topicAndSubscriber.subscriber)
-		delete(b.topicSubscriberStreamMutexes[topicAndSubscriber.topic], topicAndSubscriber.subscriber)
+	for _, key := range keys {
+		delete(b.subscribers[key.topic], key.subscriberId)
+		delete(b.topicSubscriberStreamMutexes, key)
 	}
 }
