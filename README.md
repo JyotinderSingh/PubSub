@@ -14,6 +14,7 @@ PubSub is a Go library that implements a basic publish-subscribe messaging patte
 
   - Acts as the central hub for message routing.
   - Manages topic subscriptions and delivers messages to relevant subscribers.
+  - Automatically handles dead listeners and cleans up stale subscriptions.
   - Provides gRPC endpoints for publishing and subscribing.
 
 - **Consumer:**
