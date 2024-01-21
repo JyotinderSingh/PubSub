@@ -165,3 +165,47 @@ func TestUnsubscribe(t *testing.T) {
 	message = <-consumer2.Messages
 	assertMessage(t, "topic", "world", message)
 }
+
+// Tests subscribing to two topics, unsubscribing from one and then publishing
+// messages to both topics.
+func TestUnsubscribeFromOneTopic(t *testing.T) {
+	setup()
+	defer teardown()
+
+	publisher := setupPublisher(t, "localhost:50054")
+	defer publisher.Close()
+
+	consumer := setupConsumer(t, "localhost:50054")
+	defer consumer.Close()
+
+	consumer.Subscribe("topic1")
+	consumer.Subscribe("topic2")
+
+	time.Sleep(100 * time.Millisecond)
+
+	publisher.Publish("topic1", []byte("hello"))
+	publisher.Publish("topic2", []byte("world"))
+
+	message := <-consumer.Messages
+	assertMessage(t, "topic1", "hello", message)
+
+	message = <-consumer.Messages
+	assertMessage(t, "topic2", "world", message)
+
+	consumer.Unsubscribe("topic1")
+
+	time.Sleep(200 * time.Millisecond)
+
+	publisher.Publish("topic1", []byte("hello"))
+	publisher.Publish("topic2", []byte("world"))
+
+	// No message should be received by consumer1.
+	select {
+	case message := <-consumer.Messages:
+		t.Fatalf("unexpected message received by consumer: %v", message)
+	default:
+	}
+
+	message = <-consumer.Messages
+	assertMessage(t, "topic2", "world", message)
+}
