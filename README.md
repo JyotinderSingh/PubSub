@@ -2,6 +2,8 @@
 
 PubSub is a Go library that implements a basic publish-subscribe messaging pattern using gRPC. It allows you to create brokers, consumers, and publishers to send and receive messages across different components in your distributed systems.
 
+![pubsub architecture](./pubsub.png)
+
 ## Features
 
 - **gRPC-based communication:** Leverages gRPC for efficient and language-agnostic communication.
