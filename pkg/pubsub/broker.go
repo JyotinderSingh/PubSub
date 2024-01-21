@@ -32,14 +32,19 @@ type Broker struct {
 	topicSubscriberStreamMutexes map[streamKey]*sync.Mutex              // Mutex for each subscriber stream
 	mu                           sync.RWMutex
 	logger                       *zap.Logger
+	ctx                          context.Context
+	cancel                       context.CancelFunc
 }
 
 func NewBroker(port string) *Broker {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &Broker{
 		port:                         port,
 		subscribers:                  make(map[string]map[uint32]subscriberStream),
 		topicSubscriberStreamMutexes: make(map[streamKey]*sync.Mutex),
 		logger:                       zap.Must(zap.NewProduction()),
+		ctx:                          ctx,
+		cancel:                       cancel,
 	}
 }
 
@@ -76,6 +81,7 @@ func (b *Broker) startGRPCServer() error {
 }
 
 func (b *Broker) Stop() error {
+	b.cancel()
 	b.grpcServer.GracefulStop()
 	if err := b.listener.Close(); err != nil {
 		b.logger.Info("Failed to close listener", zap.Error(err))
@@ -107,9 +113,16 @@ func (b *Broker) Subscribe(in *pb.SubscribeRequest, stream pb.PubSubService_Subs
 
 	b.mu.Unlock()
 
-	<-stream.Context().Done()
-	// Wait for the client to close the stream
-	return nil
+	for {
+		select {
+		// Wait for the client to close the stream
+		case <-stream.Context().Done():
+			return nil
+			// Wait for the broker to shutdown
+		case <-b.ctx.Done():
+			return nil
+		}
+	}
 }
 
 func (b *Broker) Unsubscribe(ctx context.Context, in *pb.UnsubscribeRequest) (*pb.UnsubscribeResponse, error) {
