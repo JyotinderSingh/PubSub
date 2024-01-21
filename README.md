@@ -1,6 +1,6 @@
-# GoSub: A Simple PubSub Library for Go
+# PubSub: A Simple Publish/Subscribe Messaging Library for Go
 
-GoSub is a Go library that implements a basic publish-subscribe messaging pattern using gRPC. It allows you to create brokers, consumers, and publishers to send and receive messages across different components in your distributed systems.
+PubSub is a Go library that implements a basic publish-subscribe messaging pattern using gRPC. It allows you to create brokers, consumers, and publishers to send and receive messages across different components in your distributed systems.
 
 ## Features
 
@@ -96,8 +96,8 @@ Refer to the `testing` directory within the repository for more detailed usage s
 
 ## Contributing
 
-Contributions to improve and extend GoSub are welcome! Please follow the contribution guidelines outlined in the repository.
+Contributions to improve and extend PubSub are welcome! Please follow the contribution guidelines outlined in the repository.
 
 ## License
 
-GoSub is released under the MIT License
+PubSub is released under the MIT License
