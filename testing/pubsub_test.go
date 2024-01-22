@@ -194,10 +194,7 @@ func TestUnsubscribeFromOneTopic(t *testing.T) {
 
 	consumer.Unsubscribe("topic1")
 
-	time.Sleep(200 * time.Millisecond)
-
 	publisher.Publish("topic1", []byte("hello"))
-	publisher.Publish("topic2", []byte("world"))
 
 	// No message should be received by consumer1.
 	select {
@@ -205,6 +202,8 @@ func TestUnsubscribeFromOneTopic(t *testing.T) {
 		t.Fatalf("unexpected message received by consumer: %v", message)
 	default:
 	}
+
+	publisher.Publish("topic2", []byte("world"))
 
 	message = <-consumer.Messages
 	assertMessage(t, "topic2", "world", message)
