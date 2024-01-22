@@ -90,11 +90,8 @@ func (c *Consumer) Unsubscribe(topic string) error {
 
 	// Send an unsubscribe request to the broker.
 	_, err := c.client.Unsubscribe(c.ctx, &pb.UnsubscribeRequest{Topic: topic, SubscriberId: c.ID})
-	if err != nil {
-		return err
-	}
 
-	return nil
+	return err
 }
 
 // receive receives messages from the broker on the given stream and pushes them

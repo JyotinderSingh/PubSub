@@ -163,7 +163,7 @@ func (b *Broker) Publish(ctx context.Context, in *pb.PublishRequest) (*pb.Publis
 		if err != nil {
 			b.logger.Error("Failed to send message to subscriber", zap.Uint32("id", subscriberId), zap.Error(err))
 			// Add to broken subscribers list so that we can remove it later.
-			brokenSubscribers = append(brokenSubscribers, streamKey{topic: in.GetTopic(), subscriberId: subscriberId})
+			brokenSubscribers = append(brokenSubscribers, key)
 		}
 	}
 	b.mu.RUnlock()
